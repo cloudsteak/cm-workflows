@@ -1,20 +1,24 @@
-
 name: Release
 
 on:
   workflow_call:
     inputs:
       release_type:
-        description: 'Release type (major, minor, patch)'
+        description: "Release type (major, minor, patch)"
         required: true
         type: string
       branch:
-        description: 'Branch to release from'
+        description: "Branch to release from"
         required: true
         type: string
+      scripts_version:
+        description: 'Version of cm-workflows scripts to use'
+        required: false
+        type: string
+        default: '1.0.0'
     outputs:
       new_version:
-        description: 'The new version tag created'
+        description: "The new version tag created"
         value: ${{ jobs.release.outputs.new_version }}
 
 jobs:
@@ -27,6 +31,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.branch }}
+
+      - name: Checkout scripts
+        uses: actions/checkout@v4
+        with:
+          repository: your-org/cm-workflows
+          ref: ${{ inputs.scripts_version }}  # Specify the version or branch or commit SHA
+          path: .cm-workflows
 
       - name: Fetch all tags
         run: git fetch --tags
@@ -43,20 +54,8 @@ jobs:
       - name: Calculate next version
         id: bump_version
         run: |
-          version=${{ steps.get_tag.outputs.latest_tag }}
-          version=${version#v}
-          IFS='.' read -r major minor patch <<< "$version"
-          case "${{ inputs.release_type }}" in
-            major)
-              major=$((major+1)); minor=0; patch=0;;
-            minor)
-              minor=$((minor+1)); patch=0;;
-            patch)
-              patch=$((patch+1));;
-          esac
-          new_version="v$major.$minor.$patch"
+          new_version=$(.cm-workflows/scripts/bump-version.sh "${{ steps.get_tag.outputs.latest_tag }}" "${{ inputs.release_type }}")
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
-
       - name: Create tag
         run: |
           git config user.name "github-actions"
