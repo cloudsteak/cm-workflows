@@ -35,7 +35,7 @@ jobs:
       - name: Checkout scripts
         uses: actions/checkout@v4
         with:
-          repository: your-org/cm-workflows
+          repository: cloudsteak/cm-workflows
           ref: ${{ inputs.scripts_version }}  # Specify the version or branch or commit SHA
           path: .cm-workflows
 
