@@ -21,4 +21,4 @@ case "$release_type" in
 esac
 
 # Output new version
-echo "v$major.$minor.$patch"
+echo "$major.$minor.$patch"
