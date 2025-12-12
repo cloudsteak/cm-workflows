@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      release_type:
+        description: "Release type (major, minor, patch)"
+        required: true
+        type: string
+      branch:
+        description: "Branch to release from"
+        required: true
+        type: string
+      scripts_version:
+        description: 'Version of cm-workflows scripts to use'
+        required: false
+        type: string
+        default: '1.0.0'
+    outputs:
+      new_version:
+        description: "The new version tag created"
+        value: ${{ jobs.release.outputs.new_version }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.bump_version.outputs.new_version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Checkout scripts
+        uses: actions/checkout@v4
+        with:
+          repository: your-org/cm-workflows
+          ref: ${{ inputs.scripts_version }}  # Specify the version or branch or commit SHA
+          path: .cm-workflows
+
+      - name: Fetch all tags
+        run: git fetch --tags
+
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          latest_tag=$(git tag --list --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
+          if [ -z "$latest_tag" ]; then
+            latest_tag="0.0.0"
+          fi
+          echo "latest_tag=$latest_tag" >> $GITHUB_OUTPUT
+
+      - name: Calculate next version
+        id: bump_version
+        run: |
+          new_version=$(.cm-workflows/scripts/bump-version.sh "${{ steps.get_tag.outputs.latest_tag }}" "${{ inputs.release_type }}")
+          echo "new_version=$new_version" >> $GITHUB_OUTPUT
+      - name: Create tag
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag ${{ steps.bump_version.outputs.new_version }}
+          git push origin ${{ steps.bump_version.outputs.new_version }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump_version.outputs.new_version }}
+          name: Release ${{ steps.bump_version.outputs.new_version }}
+          generate_release_notes: true
