@@ -18,10 +18,6 @@ on:
         required: false
         type: string
         default: "linux/amd64"
-      prod_release:
-        required: false
-        type: boolean
-        default: false
 
 jobs:
   build:
@@ -48,8 +44,7 @@ jobs:
         id: vars
         run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
-      - name: Build and push image (dev)
-        if: ${{ !inputs.prod_release }}
+      - name: Build and push image
         uses: docker/build-push-action@v5
         with:
           context: ${{ inputs.build_context }}
@@ -59,14 +54,3 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/${{ inputs.image_name }}:latest
             ghcr.io/${{ github.repository_owner }}/${{ inputs.image_name }}:${{ steps.vars.outputs.SHORT_SHA }}
-
-      - name: Build and push image (prod)
-        if: ${{ inputs.prod_release }}
-        uses: docker/build-push-action@v5
-        with:
-          context: ${{ inputs.build_context }}
-          file: ${{ inputs.dockerfile_path }}
-          platforms: ${{ inputs.platforms }}
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/${{ inputs.image_name }}:${{ github.ref_name }}
