@@ -3,12 +3,8 @@ name: Production Build from Tag
 on:
   workflow_call:
     inputs:
-      tag_version:
-        description: 'Tag version to build'
-        required: true
-        type: string
       image_name:
-        description: 'Docker image name'
+        description: "Docker image name"
         required: true
         type: string
       dockerfile_path:
@@ -32,11 +28,20 @@ jobs:
       packages: write
 
     steps:
-      - name: Checkout tag
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          git fetch --tags
+          latest_tag=$(git tag --sort=-v:refname | head -1)
+          echo "latest_tag=$latest_tag" >> $GITHUB_OUTPUT
+
+      - name: Checkout latest tag
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag_version }}
-
+          ref: ${{ steps.get_tag.outputs.latest_tag }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -55,4 +60,4 @@ jobs:
           platforms: ${{ inputs.platforms }}
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/${{ inputs.image_name }}:${{ inputs.tag_version }}
+            ghcr.io/${{ github.repository_owner }}/${{ inputs.image_name }}:${{ steps.get_tag.outputs.latest_tag }}
