@@ -1,0 +1,112 @@
+name: Create Service Release
+
+on:
+    workflow_call:
+        inputs:
+            service:
+                description: "Service name (folder under services/), e.g. messenger"
+                required: true
+                type: string
+            release_type:
+                description: "Release type (major, minor, patch)"
+                required: true
+                type: string
+            branch:
+                description: "Branch to release from"
+                required: true
+                type: string
+        outputs:
+            new_version:
+                description: "The new version tag created"
+                value: ${{ jobs.release.outputs.new_version }}
+            new_tag:
+                description: "The full service tag created (service/vX.Y.Z)"
+                value: ${{ jobs.release.outputs.new_tag }}
+
+jobs:
+    release:
+        runs-on: ubuntu-latest
+        outputs:
+            new_version: ${{ steps.bump_version.outputs.new_version }}
+            new_tag: ${{ steps.make_tag.outputs.new_tag }}
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  ref: ${{ inputs.branch }}
+                  fetch-depth: 0
+
+            - name: Checkout scripts
+              uses: actions/checkout@v4
+              with:
+                  repository: cloudsteak/cm-workflows
+                  ref: ${{ github.ref_name }}
+                  path: .cm-workflows
+
+            - name: Fetch all tags
+              run: git fetch --tags --force
+
+            - name: Get latest tag for service
+              id: get_tag
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  SERVICE="${{ inputs.service }}"
+
+                  # Expect tags like: <service>/v1.2.3  (or <service>/1.2.3 if you ever used that)
+                  latest_tag="$(
+                    git tag --list "${SERVICE}/*" --sort=-v:refname \
+                      | grep -E "^${SERVICE}/v?[0-9]+\.[0-9]+\.[0-9]+$" \
+                      | head -n 1
+                  )"
+
+                  if [[ -z "${latest_tag}" ]]; then
+                    # Base version when no tags exist yet
+                    latest_tag="${SERVICE}/v0.0.0"
+                  fi
+
+                  echo "latest_tag=${latest_tag}" >> "$GITHUB_OUTPUT"
+
+            - name: Calculate next version
+              id: bump_version
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  # latest_tag is service-scoped: <service>/vX.Y.Z
+                  latest_tag="${{ steps.get_tag.outputs.latest_tag }}"
+
+                  # Extract version part: vX.Y.Z
+                  latest_version="${latest_tag#*/}"
+
+                  new_version="$(.cm-workflows/scripts/bump-version.sh "${latest_version}" "${{ inputs.release_type }}")"
+
+                  # Ensure it has v prefix (optional but recommended)
+                  if [[ "${new_version}" != v* ]]; then
+                    new_version="v${new_version}"
+                  fi
+
+                  echo "new_version=${new_version}" >> "$GITHUB_OUTPUT"
+
+            - name: Compose full tag
+              id: make_tag
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  full_tag="${{ inputs.service }}/${{ steps.bump_version.outputs.new_version }}"
+                  echo "new_tag=${full_tag}" >> "$GITHUB_OUTPUT"
+
+            - name: Create tag
+              run: |
+                  git config user.name "github-actions"
+                  git config user.email "github-actions@github.com"
+                  git tag "${{ steps.make_tag.outputs.new_tag }}"
+                  git push origin "${{ steps.make_tag.outputs.new_tag }}"
+
+            - name: Create GitHub Release
+              uses: softprops/action-gh-release@v2
+              with:
+                  tag_name: ${{ steps.make_tag.outputs.new_tag }}
+                  name: Release ${{ steps.make_tag.outputs.new_tag }}
+                  generate_release_notes: true
