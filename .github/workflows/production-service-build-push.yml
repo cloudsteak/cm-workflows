@@ -3,18 +3,6 @@ name: Production Build from Tag
 on:
   workflow_call:
     inputs:
-      image_name:
-        description: "Docker image name"
-        required: true
-        type: string
-      dockerfile_path:
-        required: false
-        type: string
-        default: "./Dockerfile"
-      build_context:
-        required: false
-        type: string
-        default: "."
       platforms:
         required: false
         type: string
@@ -32,12 +20,42 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
+          fetch-depth: 0
 
-      - name: Validate semantic version tag
+      - name: Parse service and version from tag
+        id: parse
+        shell: bash
         run: |
-          if ! echo "${{ github.ref_name }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Error: Tag must be semantic version format (e.g., 1.0.0)"
-            echo "Current tag: ${{ github.ref_name }}"
+          set -euo pipefail
+
+          TAG="${{ github.ref_name }}"
+
+          # Expect: <service>/<X.Y.Z>
+          if ! echo "$TAG" | grep -qE '^[a-zA-Z0-9._-]+/[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: Tag must be in format <service>/<X.Y.Z> (e.g., messenger/1.0.0)"
+            echo "Current tag: $TAG"
+            exit 1
+          fi
+
+          SERVICE="${TAG%%/*}"
+          VERSION="${TAG#*/}"
+
+          echo "service=$SERVICE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Validate service folder exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE="${{ steps.parse.outputs.service }}"
+          if [[ ! -d "services/${SERVICE}" ]]; then
+            echo "Service folder not found: services/${SERVICE}"
+            echo "Available services:"
+            ls -1 services || true
+            exit 1
+          fi
+          if [[ ! -f "services/${SERVICE}/Dockerfile" ]]; then
+            echo "Dockerfile not found: services/${SERVICE}/Dockerfile"
             exit 1
           fi
 
@@ -54,9 +72,9 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v5
         with:
-          context: ${{ inputs.build_context }}
-          file: ${{ inputs.dockerfile_path }}
+          context: services/${{ steps.parse.outputs.service }}
+          file: services/${{ steps.parse.outputs.service }}/Dockerfile
           platforms: ${{ inputs.platforms }}
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/${{ inputs.image_name }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/${{ steps.parse.outputs.service }}:${{ steps.parse.outputs.version }}
