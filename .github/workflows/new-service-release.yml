@@ -1,0 +1,117 @@
+name: Create Service Release
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: "Service name (folder under services/), e.g. messenger"
+        required: true
+        type: string
+      release_type:
+        description: "Release type (major, minor, patch)"
+        required: true
+        type: string
+      branch:
+        description: "Branch to release from"
+        required: true
+        type: string
+    outputs:
+      new_version:
+        description: "The new version created (X.Y.Z)"
+        value: ${{ jobs.release.outputs.new_version }}
+      new_tag:
+        description: "The full service tag created (service/X.Y.Z)"
+        value: ${{ jobs.release.outputs.new_tag }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+      new_tag: ${{ steps.compose.outputs.new_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      - name: Checkout scripts
+        uses: actions/checkout@v4
+        with:
+          repository: cloudsteak/cm-workflows
+          ref: 1.3.0
+          path: .cm-workflows
+
+      - name: Validate service folder exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE="${{ inputs.service }}"
+          if [[ ! -d "services/${SERVICE}" ]]; then
+            echo "❌ Service folder not found: services/${SERVICE}"
+            echo "Available services:"
+            ls -1 services || true
+            exit 1
+          fi
+
+      - name: Fetch all tags
+        run: git fetch --tags --force
+
+      - name: Get latest tag for service
+        id: get_tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVICE="${{ inputs.service }}"
+
+          latest_tag="$(
+            git tag --list "${SERVICE}/*" --sort=-v:refname \
+              | grep -E "^${SERVICE}/[0-9]+\.[0-9]+\.[0-9]+$" || true
+          )"
+
+          latest_tag="$(echo "$latest_tag" | head -n 1)"
+
+          if [[ -z "$latest_tag" ]]; then
+            latest_tag="${SERVICE}/0.0.0"
+          fi
+
+          echo "latest_tag=${latest_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Bump version
+        id: bump
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          latest_tag="${{ steps.get_tag.outputs.latest_tag }}"
+          latest_version="${latest_tag#*/}"
+
+          new_version="$(
+            .cm-workflows/scripts/bump-version.sh \
+              "${latest_version}" \
+              "${{ inputs.release_type }}"
+          )"
+
+          echo "new_version=${new_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Compose full tag
+        id: compose
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "new_tag=${{ inputs.service }}/${{ steps.bump.outputs.new_version }}" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag "${{ steps.compose.outputs.new_tag }}"
+          git push origin "${{ steps.compose.outputs.new_tag }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.compose.outputs.new_tag }}
+          name: Release ${{ steps.compose.outputs.new_tag }}
+          generate_release_notes: true
