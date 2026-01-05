@@ -17,7 +17,7 @@ on:
                 type: string
         outputs:
             new_version:
-                description: "The new version tag created"
+                description: "The new version tag created (vX.Y.Z)"
                 value: ${{ jobs.release.outputs.new_version }}
             new_tag:
                 description: "The full service tag created (service/vX.Y.Z)"
@@ -27,8 +27,8 @@ jobs:
     release:
         runs-on: ubuntu-latest
         outputs:
-            new_version: ${{ steps.bump_version.outputs.new_version }}
-            new_tag: ${{ steps.make_tag.outputs.new_tag }}
+            new_version: ${{ steps.bump.outputs.new_version }}
+            new_tag: ${{ steps.compose.outputs.new_tag }}
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
@@ -43,6 +43,18 @@ jobs:
                   ref: ${{ github.ref_name }}
                   path: .cm-workflows
 
+            - name: Validate service folder exists
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  SERVICE="${{ inputs.service }}"
+                  if [[ ! -d "services/${SERVICE}" ]]; then
+                    echo "❌ Service folder not found: services/${SERVICE}"
+                    echo "Available services:"
+                    ls -1 services || true
+                    exit 1
+                  fi
+
             - name: Fetch all tags
               run: git fetch --tags --force
 
@@ -51,38 +63,35 @@ jobs:
               shell: bash
               run: |
                   set -euo pipefail
-
                   SERVICE="${{ inputs.service }}"
 
-                  # Expect tags like: <service>/v1.2.3  (or <service>/1.2.3 if you ever used that)
                   latest_tag="$(
                     git tag --list "${SERVICE}/*" --sort=-v:refname \
-                      | grep -E "^${SERVICE}/v?[0-9]+\.[0-9]+\.[0-9]+$" \
-                      | head -n 1
+                      | grep -E "^${SERVICE}/v?[0-9]+\.[0-9]+\.[0-9]+$" || true
                   )"
 
-                  if [[ -z "${latest_tag}" ]]; then
-                    # Base version when no tags exist yet
+                  latest_tag="$(echo "$latest_tag" | head -n 1)"
+
+                  if [[ -z "$latest_tag" ]]; then
                     latest_tag="${SERVICE}/v0.0.0"
                   fi
 
                   echo "latest_tag=${latest_tag}" >> "$GITHUB_OUTPUT"
 
-            - name: Calculate next version
-              id: bump_version
+            - name: Bump version
+              id: bump
               shell: bash
               run: |
                   set -euo pipefail
-
-                  # latest_tag is service-scoped: <service>/vX.Y.Z
                   latest_tag="${{ steps.get_tag.outputs.latest_tag }}"
-
-                  # Extract version part: vX.Y.Z
                   latest_version="${latest_tag#*/}"
 
-                  new_version="$(.cm-workflows/scripts/bump-version.sh "${latest_version}" "${{ inputs.release_type }}")"
+                  new_version="$(
+                    .cm-workflows/scripts/bump-version.sh \
+                      "${latest_version}" \
+                      "${{ inputs.release_type }}"
+                  )"
 
-                  # Ensure it has v prefix (optional but recommended)
                   if [[ "${new_version}" != v* ]]; then
                     new_version="v${new_version}"
                   fi
@@ -90,23 +99,22 @@ jobs:
                   echo "new_version=${new_version}" >> "$GITHUB_OUTPUT"
 
             - name: Compose full tag
-              id: make_tag
+              id: compose
               shell: bash
               run: |
                   set -euo pipefail
-                  full_tag="${{ inputs.service }}/${{ steps.bump_version.outputs.new_version }}"
-                  echo "new_tag=${full_tag}" >> "$GITHUB_OUTPUT"
+                  echo "new_tag=${{ inputs.service }}/${{ steps.bump.outputs.new_version }}" >> "$GITHUB_OUTPUT"
 
             - name: Create tag
               run: |
                   git config user.name "github-actions"
                   git config user.email "github-actions@github.com"
-                  git tag "${{ steps.make_tag.outputs.new_tag }}"
-                  git push origin "${{ steps.make_tag.outputs.new_tag }}"
+                  git tag "${{ steps.compose.outputs.new_tag }}"
+                  git push origin "${{ steps.compose.outputs.new_tag }}"
 
             - name: Create GitHub Release
               uses: softprops/action-gh-release@v2
               with:
-                  tag_name: ${{ steps.make_tag.outputs.new_tag }}
-                  name: Release ${{ steps.make_tag.outputs.new_tag }}
+                  tag_name: ${{ steps.compose.outputs.new_tag }}
+                  name: Release ${{ steps.compose.outputs.new_tag }}
                   generate_release_notes: true
