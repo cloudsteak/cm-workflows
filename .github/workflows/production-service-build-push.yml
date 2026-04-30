@@ -7,6 +7,10 @@ on:
         required: false
         type: string
         default: "linux/amd64"
+      build_args:
+        required: false
+        type: string
+        default: ""
 
 jobs:
   build:
@@ -75,6 +79,7 @@ jobs:
           context: services/${{ steps.parse.outputs.service }}
           file: services/${{ steps.parse.outputs.service }}/Dockerfile
           platforms: ${{ inputs.platforms }}
+          build-args: ${{ inputs.build_args }}
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/${{ steps.parse.outputs.service }}:${{ steps.parse.outputs.version }}
