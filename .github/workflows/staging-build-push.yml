@@ -6,6 +6,10 @@ on:
       image_name:
         required: true
         type: string
+      build_args:
+        required: false
+        type: string
+        default: ""
       dockerfile_path:
         required: false
         type: string
@@ -50,6 +54,7 @@ jobs:
           context: ${{ inputs.build_context }}
           file: ${{ inputs.dockerfile_path }}
           platforms: ${{ inputs.platforms }}
+          build-args: ${{ inputs.build_args }}
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/${{ inputs.image_name }}:latest
